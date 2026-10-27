@@ -148,6 +148,16 @@ def plan_day(day: str, files: List[Path], day_dir: Path) -> DayPlan:
             if dst.stat().st_size == src.stat().st_size and sha256_file(dst) == sha256_file(src):
                 plan.already_present.append(src)
                 continue
+            collision_re = re.compile(rf"{re.escape(dst.stem)}_\d+{re.escape(dst.suffix)}")
+            if any(
+                collision_re.fullmatch(candidate.name)
+                and candidate.is_file()
+                and candidate.stat().st_size == src.stat().st_size
+                and sha256_file(candidate) == sha256_file(src)
+                for candidate in day_dir.iterdir()
+            ):
+                plan.already_present.append(src)
+                continue
             dst = unique_name(dst)
         while dst in reserved or dst.exists():
             dst = dst.with_name(f"{dst.stem}_x{dst.suffix}")
