@@ -108,12 +108,18 @@ def run(source: Path, backup: Path, assume_yes=False, dry_run=False, input_fn=in
                 report.declined_days.append(p.day)
                 continue
 
-        free = shutil.disk_usage(backup).free
-        if p.bytes_needed > free:
-            report.failures.append(f"{p.day}: not enough free space")
+        try:
+            free = shutil.disk_usage(backup).free
+            if p.bytes_needed > free:
+                report.failures.append(f"{p.day}: not enough free space")
+                continue
+            p.day_dir.mkdir(exist_ok=True)
+        except OSError as e:
+            report.failures.append(f"{p.day}: {e}")
+            if not backup.is_dir():
+                report.aborted = True
+                break
             continue
-
-        p.day_dir.mkdir(exist_ok=True)
         copied_here = 0
         for src, dst in p.to_copy:
             try:
