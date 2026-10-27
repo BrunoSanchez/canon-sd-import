@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List
 
-from .core import cleanup_partials, copy_verified, group_by_day, human_size, plan_day, scan_media
+from .core import cleanup_partials, copy_verified, group_by_day, human_size, plan_day, scan_files
+from .progress import Progress
 from .summary import format_report
 
 
@@ -50,7 +51,11 @@ def print_changes(r: Report, print_fn: Callable[..., None] = print) -> None:
         print_fn("  RUN WAS INTERRUPTED - re-run to resume safely.")
 
 
-def run(source: Path, backup: Path, assume_yes=False, dry_run=False, input_fn=input, print_fn=print) -> Report:
+LARGE_FILE = 64 * 1024 * 1024
+
+
+def run(source: Path, backup: Path, assume_yes=False, dry_run=False, input_fn=input, print_fn=print,
+        deep=False, progress=True) -> Report:
     source, backup = Path(source), Path(backup)
     if not source.is_dir():
         raise UserError(f"SD card folder not found: {source}")
@@ -63,17 +68,22 @@ def run(source: Path, backup: Path, assume_yes=False, dry_run=False, input_fn=in
     if not dry_run:
         cleanup_partials(backup)
 
-    files = scan_media(source)
+    scan_bar = Progress("Scanning", enabled=progress)
+    files = scan_files(source, scan_bar)
+    scan_bar.finish()
     groups = group_by_day(files)
     plans = []
+    plan_bar = Progress("Planning (deep)" if deep else "Planning", total_items=len(files),
+                        enabled=progress)
     for d in sorted(groups):
         day_dir = backup / d
         legacy_dir = backup / d.replace("_", "-")
         if not day_dir.exists() and legacy_dir.is_dir():
             day_dir = legacy_dir
-        plan = plan_day(d, groups[d], day_dir)
+        plan = plan_day(d, groups[d], day_dir, deep=deep, progress=plan_bar)
         plans.append(plan)
         report.failures.extend(f"{d}/{src.name}: {error}" for src, error in plan.failures)
+    plan_bar.finish()
     print_fn(f"Found {len(files)} photo/video files on the SD card across {len(plans)} day(s).\n")
 
     for p in plans:
@@ -96,19 +106,28 @@ def run(source: Path, backup: Path, assume_yes=False, dry_run=False, input_fn=in
         print_fn("Dry run: nothing was copied.")
         return report
 
+    bar = Progress("Copying", enabled=progress)
+    if assume_yes:
+        bar.add_total(sum(len(p.to_copy) for p in pending), sum(p.bytes_needed for p in pending))
+
     accept_all = assume_yes
-    for p in pending:
+    for idx, p in enumerate(pending):
         if not accept_all:
             kind = f"Add {len(p.to_copy)} missing file(s) to existing folder" if p.exists else f"Create new folder and copy {len(p.to_copy)} file(s) into"
+            bar.clear()
             ans = input_fn(f"{kind} {p.day_dir.name} ({human_size(p.bytes_needed)})? [y]es / [n]o / [a]ll / [q]uit: ").strip().lower()
             if ans in ("q", "quit"):
                 report.aborted = True
                 break
             if ans in ("a", "all"):
                 accept_all = True
-            elif ans not in ("y", "yes"):
+                rest = pending[idx:]
+            elif ans in ("y", "yes"):
+                rest = [p]
+            else:
                 report.declined_days.append(p.day)
                 continue
+            bar.add_total(sum(len(q.to_copy) for q in rest), sum(q.bytes_needed for q in rest))
 
         try:
             free = shutil.disk_usage(backup).free
@@ -124,13 +143,29 @@ def run(source: Path, backup: Path, assume_yes=False, dry_run=False, input_fn=in
             continue
         copied_here = 0
         for src, dst in p.to_copy:
+            size = p.sizes.get(src, 0)
+            state = {"done": 0, "ver": 0}
+
+            def on_copy(n, name=src.name, size=size, state=state):
+                state["done"] += n
+                note = name
+                if size >= LARGE_FILE:
+                    note += f" {state['done'] * 100 // max(size, 1)}%"
+                bar.update(nbytes=n, note=note)
+
+            def on_verify(n, name=src.name, size=size, state=state):
+                state["ver"] += n
+                bar.set_note(f"verifying {name} {state['ver'] * 100 // max(size, 1)}%")
+
             try:
-                copy_verified(src, dst)
+                copy_verified(src, dst, on_copy, on_verify)
                 copied_here += 1
                 report.files_copied += 1
-                report.bytes_copied += dst.stat().st_size
+                report.bytes_copied += size
+                bar.update(items=1)
             except Exception as e:
                 report.failures.append(f"{p.day}/{src.name}: {e}")
+                bar.update(items=1)
                 if not backup.is_dir():
                     report.aborted = True
                     break
@@ -139,8 +174,9 @@ def run(source: Path, backup: Path, assume_yes=False, dry_run=False, input_fn=in
         if report.aborted:
             break
 
+    bar.finish()
     print_changes(report, print_fn)
     if backup.is_dir():
         print_fn("\nFinal backup contents:")
-        print_fn(format_report(backup))
+        print_fn(format_report(backup, progress=progress))
     return report
