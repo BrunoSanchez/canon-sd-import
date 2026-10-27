@@ -11,14 +11,14 @@ def test_planning_failure_does_not_stop_other_files(dirs, make_file, monkeypatch
 
     original_sha256_file = canon_import.core.sha256_file
 
-    def fail_for_one_file(path):
+    def fail_for_one_file(path, *args):
         if path == failing:
             raise PermissionError("unreadable source")
-        return original_sha256_file(path)
+        return original_sha256_file(path, *args)
 
     monkeypatch.setattr(canon_import.core, "sha256_file", fail_for_one_file)
 
-    rep = run(sd, backup, assume_yes=True, print_fn=lambda *a, **k: None)
+    rep = run(sd, backup, assume_yes=True, deep=True, print_fn=lambda *a, **k: None)
 
     assert rep.files_copied == 1
     assert (backup / "2026_10_27" / "IMG_0002.CR3").read_bytes() == b"copy me"
@@ -51,8 +51,8 @@ def test_never_overwrites_conflicting_name(dirs, make_file):
     make_file(backup / "2026_10_27" / "IMG_0001.CR3", b"old", day="2026-10-27")
     make_file(sd / "100CANON" / "IMG_0001.CR3", b"new", day="2026-10-27")
 
-    rep = run(sd, backup, assume_yes=True, print_fn=lambda *a, **k: None)
-    rep2 = run(sd, backup, assume_yes=True, print_fn=lambda *a, **k: None)
+    rep = run(sd, backup, assume_yes=True, deep=True, print_fn=lambda *a, **k: None)
+    rep2 = run(sd, backup, assume_yes=True, deep=True, print_fn=lambda *a, **k: None)
 
     assert rep.files_copied == 1
     assert (backup / "2026_10_27" / "IMG_0001.CR3").read_bytes() == b"old"
