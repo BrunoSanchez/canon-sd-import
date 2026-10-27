@@ -17,5 +17,9 @@ test = ["pytest"]
 canon-import = "canon_import.cli:import_main"
 canon-summary = "canon_import.cli:summary_main"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
 [tool.setuptools]
 packages = ["canon_import"]
