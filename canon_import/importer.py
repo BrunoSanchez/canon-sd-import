@@ -71,7 +71,9 @@ def run(source: Path, backup: Path, assume_yes=False, dry_run=False, input_fn=in
         legacy_dir = backup / d.replace("_", "-")
         if not day_dir.exists() and legacy_dir.is_dir():
             day_dir = legacy_dir
-        plans.append(plan_day(d, groups[d], day_dir))
+        plan = plan_day(d, groups[d], day_dir)
+        plans.append(plan)
+        report.failures.extend(f"{d}/{src.name}: {error}" for src, error in plan.failures)
     print_fn(f"Found {len(files)} photo/video files on the SD card across {len(plans)} day(s).\n")
 
     for p in plans:

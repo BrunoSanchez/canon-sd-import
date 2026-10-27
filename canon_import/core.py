@@ -7,7 +7,7 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 EXTS = {
     ".cr2", ".cr3", ".crw", ".jpg", ".jpeg", ".hif", ".heic",
@@ -133,6 +133,7 @@ class DayPlan:
     exists: bool
     to_copy: List[tuple] = field(default_factory=list)
     already_present: List[Path] = field(default_factory=list)
+    failures: List[Tuple[Path, OSError]] = field(default_factory=list)
 
     @property
     def bytes_needed(self) -> int:
@@ -143,24 +144,27 @@ def plan_day(day: str, files: List[Path], day_dir: Path) -> DayPlan:
     plan = DayPlan(day=day, day_dir=day_dir, exists=day_dir.is_dir())
     reserved = set()
     for src in sorted(files):
-        dst = day_dir / src.name
-        if dst.exists():
-            if dst.stat().st_size == src.stat().st_size and sha256_file(dst) == sha256_file(src):
-                plan.already_present.append(src)
-                continue
-            collision_re = re.compile(rf"{re.escape(dst.stem)}_\d+{re.escape(dst.suffix)}")
-            if any(
-                collision_re.fullmatch(candidate.name)
-                and candidate.is_file()
-                and candidate.stat().st_size == src.stat().st_size
-                and sha256_file(candidate) == sha256_file(src)
-                for candidate in day_dir.iterdir()
-            ):
-                plan.already_present.append(src)
-                continue
-            dst = unique_name(dst)
-        while dst in reserved or dst.exists():
-            dst = dst.with_name(f"{dst.stem}_x{dst.suffix}")
-        reserved.add(dst)
-        plan.to_copy.append((src, dst))
+        try:
+            dst = day_dir / src.name
+            if dst.exists():
+                if dst.stat().st_size == src.stat().st_size and sha256_file(dst) == sha256_file(src):
+                    plan.already_present.append(src)
+                    continue
+                collision_re = re.compile(rf"{re.escape(dst.stem)}_\d+{re.escape(dst.suffix)}")
+                if any(
+                    collision_re.fullmatch(candidate.name)
+                    and candidate.is_file()
+                    and candidate.stat().st_size == src.stat().st_size
+                    and sha256_file(candidate) == sha256_file(src)
+                    for candidate in day_dir.iterdir()
+                ):
+                    plan.already_present.append(src)
+                    continue
+                dst = unique_name(dst)
+            while dst in reserved or dst.exists():
+                dst = dst.with_name(f"{dst.stem}_x{dst.suffix}")
+            reserved.add(dst)
+            plan.to_copy.append((src, dst))
+        except OSError as e:
+            plan.failures.append((src, e))
     return plan
