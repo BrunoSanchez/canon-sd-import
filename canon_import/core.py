@@ -149,7 +149,7 @@ def plan_day(day: str, files: List[Path], day_dir: Path) -> DayPlan:
                 plan.already_present.append(src)
                 continue
             dst = unique_name(dst)
-        while dst in reserved:
+        while dst in reserved or dst.exists():
             dst = dst.with_name(f"{dst.stem}_x{dst.suffix}")
         reserved.add(dst)
         plan.to_copy.append((src, dst))
