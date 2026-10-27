@@ -65,7 +65,13 @@ def run(source: Path, backup: Path, assume_yes=False, dry_run=False, input_fn=in
 
     files = scan_media(source)
     groups = group_by_day(files)
-    plans = [plan_day(d, groups[d], backup / d) for d in sorted(groups)]
+    plans = []
+    for d in sorted(groups):
+        day_dir = backup / d
+        legacy_dir = backup / d.replace("_", "-")
+        if not day_dir.exists() and legacy_dir.is_dir():
+            day_dir = legacy_dir
+        plans.append(plan_day(d, groups[d], day_dir))
     print_fn(f"Found {len(files)} photo/video files on the SD card across {len(plans)} day(s).\n")
 
     for p in plans:
