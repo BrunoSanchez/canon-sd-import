@@ -1,0 +1,3 @@
+"""Safe Canon SD card -> HDD backup tools."""
+
+__version__ = "1.0.0"
